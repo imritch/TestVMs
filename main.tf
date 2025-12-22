@@ -10,6 +10,89 @@ provider "libvirt" {
   uri = "qemu:///system"
 }
 
+# ============================================
+# Ansible Control Node (Ubuntu Server)
+# ============================================
+
+# Cloud-init disk for Ansible control node
+resource "libvirt_cloudinit_disk" "ansible_init" {
+  name      = "ansible-init.iso"
+  user_data = file("${path.module}/cloud-init-ansible.yml")
+  meta_data = ""
+}
+
+# Ansible Control Node VM
+resource "libvirt_domain" "ansible_control" {
+  name   = "ansible-control"
+  memory = 2048
+  memory_unit = "MiB"
+  vcpu   = 2
+  type   = "kvm"
+
+  os = {
+    type         = "hvm"
+    type_arch    = "x86_64"
+    type_machine = "pc-q35-8.2"
+  }
+
+  devices = {
+    disks = [
+      {
+        driver = {
+          name = "qemu"
+          type = "qcow2"
+        }
+        source = {
+          file = {
+            file = "/home/maxdop1/projects/sqlserverlab/images/ansible-control-base.qcow2"
+          }
+        }
+        target = {
+          dev = "vda"
+          bus = "virtio"
+        }
+      },
+      {
+        source = {
+          file = {
+            file = "/tmp/terraform-provider-libvirt-cloudinit/cloudinit-${libvirt_cloudinit_disk.ansible_init.id}.iso"
+          }
+        }
+        target = {
+          dev = "vdb"
+          bus = "virtio"
+        }
+      }
+    ]
+    interfaces = [
+      {
+        model = {
+          type = "virtio"
+        }
+        source = {
+          network = {
+            network = "default"
+          }
+        }
+      }
+    ]
+    graphics = [
+      {
+        vnc = {
+          autoport = true
+        }
+      }
+    ]
+  }
+
+  # Ensure VM starts automatically
+  autostart = true
+}
+
+# ============================================
+# Windows VMs
+# ============================================
+
 # Domain Controller VM
 resource "libvirt_domain" "dc01" {
   name        = "dc01"

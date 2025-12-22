@@ -1,0 +1,158 @@
+#cloud-config
+# Cloud-init configuration for Ansible Control Node
+
+hostname: ansible-control
+fqdn: ansible-control.local
+
+# Create default user
+users:
+  - name: ansible
+    gecos: Ansible Admin
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users, admin, sudo
+    shell: /bin/bash
+    lock_passwd: false
+    # Password: ansible123 (hashed)
+    passwd: $6$rounds=4096$saltsaltsal$IvXK7j8FqJpKPKhNr0gQsLm0LY/XyXBJ1QqZz5VYqJkMjR.HJHVqQKCw7rVQqFX4DvJN8YyWGZ7hOJzXVF8J11
+    ssh_authorized_keys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC... # Add your SSH key here if needed
+
+# Set timezone
+timezone: America/New_York
+
+# Package management
+package_update: true
+package_upgrade: true
+
+packages:
+  - ansible
+  - python3-pip
+  - python3-winrm
+  - git
+  - vim
+  - curl
+  - net-tools
+  - sshpass
+
+# Configure static IP
+write_files:
+  - path: /etc/netplan/50-cloud-init.yaml
+    content: |
+      network:
+        version: 2
+        ethernets:
+          enp1s0:
+            addresses:
+              - 192.168.122.5/24
+            gateway4: 192.168.122.1
+            nameservers:
+              addresses:
+                - 192.168.122.1
+                - 8.8.8.8
+    permissions: '0644'
+
+  - path: /home/ansible/.ansible.cfg
+    owner: ansible:ansible
+    permissions: '0644'
+    content: |
+      [defaults]
+      inventory = /home/ansible/lab-inventory.yml
+      host_key_checking = False
+      deprecation_warnings = False
+      interpreter_python = auto_silent
+
+      [inventory]
+      enable_plugins = yaml
+
+  - path: /home/ansible/lab-inventory.yml
+    owner: ansible:ansible
+    permissions: '0644'
+    content: |
+      all:
+        children:
+          windows:
+            vars:
+              ansible_user: Administrator
+              ansible_password: CHANGEME
+              ansible_connection: winrm
+              ansible_winrm_transport: basic
+              ansible_winrm_server_cert_validation: ignore
+              ansible_port: 5985
+
+            children:
+              domain_controller:
+                hosts:
+                  dc01:
+                    ansible_host: 192.168.122.10
+
+              sql_nodes:
+                hosts:
+                  sql01:
+                    ansible_host: 192.168.122.11
+                  sql02:
+                    ansible_host: 192.168.122.12
+                  sql03:
+                    ansible_host: 192.168.122.13
+
+  - path: /home/ansible/README.md
+    owner: ansible:ansible
+    permissions: '0644'
+    content: |
+      # Ansible Control Node
+
+      This VM is configured as an Ansible control node for managing the Windows SQL cluster lab.
+
+      ## Quick Start
+
+      1. Login: ssh ansible@192.168.122.5 (password: ansible123)
+      2. Test connectivity: ansible windows -m win_ping
+      3. Run playbooks: cd ~/playbooks && ansible-playbook <playbook.yml>
+
+      ## Default Credentials
+
+      - Username: ansible
+      - Password: ansible123
+      - Sudo: No password required
+
+      ## Installed Software
+
+      - Ansible (latest from Ubuntu repos)
+      - Python3 with pywinrm
+      - Git, Vim, common utilities
+
+      ## Network Configuration
+
+      - IP: 192.168.122.5/24
+      - Gateway: 192.168.122.1
+      - DNS: 192.168.122.1, 8.8.8.8
+
+      ## Inventory
+
+      Pre-configured inventory at: ~/lab-inventory.yml
+
+      Update the ansible_password in the inventory file with your Windows admin password.
+
+# Run commands after first boot
+runcmd:
+  - netplan apply
+  - pip3 install --upgrade pywinrm
+  - mkdir -p /home/ansible/playbooks
+  - mkdir -p /home/ansible/group_vars
+  - chown -R ansible:ansible /home/ansible
+  - systemctl enable ssh
+  - systemctl start ssh
+  - echo "Ansible control node setup complete!" > /home/ansible/setup-complete.txt
+
+# Final message
+final_message: |
+  ===================================
+  Ansible Control Node Ready!
+  ===================================
+  IP Address: 192.168.122.5
+  Username: ansible
+  Password: ansible123
+
+  SSH: ssh ansible@192.168.122.5
+
+  Ansible is installed and ready!
+  ===================================
