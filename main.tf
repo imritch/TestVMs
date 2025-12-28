@@ -11,13 +11,25 @@ provider "libvirt" {
 }
 
 # ============================================
+# Variables
+# ============================================
+
+variable "ssh_public_key" {
+  type        = string
+  description = "The SSH public key to be added to the ansible user."
+  sensitive   = true
+}
+
+# ============================================
 # Ansible Control Node (Ubuntu Server)
 # ============================================
 
 # Cloud-init disk for Ansible control node
 resource "libvirt_cloudinit_disk" "ansible_init" {
   name      = "ansible-init.iso"
-  user_data = file("${path.module}/cloud-init-ansible.yml")
+  user_data = templatefile("${path.module}/cloud-init-ansible.yml", {
+    ssh_public_key = var.ssh_public_key
+  })
   meta_data = ""
 }
 
@@ -44,7 +56,7 @@ resource "libvirt_domain" "ansible_control" {
         }
         source = {
           file = {
-            file = "/home/maxdop1/projects/sqlserverlab/images/ansible-control-base.qcow2"
+            file = "/var/lib/libvirt/images/ansible-control.qcow2"
           }
         }
         target = {

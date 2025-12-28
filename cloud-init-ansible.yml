@@ -11,11 +11,9 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     groups: users, admin, sudo
     shell: /bin/bash
-    lock_passwd: false
-    # Password: ansible123 (hashed)
-    passwd: $6$rounds=4096$saltsaltsal$IvXK7j8FqJpKPKhNr0gQsLm0LY/XyXBJ1QqZz5VYqJkMjR.HJHVqQKCw7rVQqFX4DvJN8YyWGZ7hOJzXVF8J11
+    lock_passwd: true  # SSH key authentication only
     ssh_authorized_keys:
-      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC... # Add your SSH key here if needed
+      - ${ssh_public_key}
 
 # Set timezone
 timezone: America/New_York
@@ -104,14 +102,14 @@ write_files:
 
       ## Quick Start
 
-      1. Login: ssh ansible@192.168.122.5 (password: ansible123)
+      1. Login: ssh ansible@192.168.122.5
       2. Test connectivity: ansible windows -m win_ping
       3. Run playbooks: cd ~/playbooks && ansible-playbook <playbook.yml>
 
-      ## Default Credentials
+      ## Authentication
 
       - Username: ansible
-      - Password: ansible123
+      - Authentication: SSH key only (password login disabled)
       - Sudo: No password required
 
       ## Installed Software
@@ -150,7 +148,7 @@ final_message: |
   ===================================
   IP Address: 192.168.122.5
   Username: ansible
-  Password: ansible123
+  Authentication: SSH key only
 
   SSH: ssh ansible@192.168.122.5
 
