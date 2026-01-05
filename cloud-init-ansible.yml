@@ -92,43 +92,190 @@ write_files:
                   sql03:
                     ansible_host: 192.168.122.13
 
+  - path: /home/ansible/group_vars/all.yml
+    owner: ansible:ansible
+    permissions: '0644'
+    content: |
+      ---
+      # Domain configuration
+      domain_name: sqllab.local
+      domain_netbios_name: SQLLAB
+      safe_mode_password: P@ssw0rd123!
+
+      # Network configuration
+      domain_controller_ip: 192.168.122.10
+      dns_servers:
+        - 192.168.122.10
+
+      # SQL Server configuration
+      sql_version: "2025"
+      sql_edition: Developer
+      sql_install_path: "C:\\SQLServer"
+      sql_data_path: "C:\\SQLData"
+      sql_log_path: "C:\\SQLLogs"
+
+      # Cluster configuration
+      cluster_name: SQLCLUSTER
+      cluster_ip: 192.168.122.20
+
+  - path: /home/ansible/playbooks/01-setup-dc.yml
+    owner: ansible:ansible
+    permissions: '0644'
+    content: |
+      ---
+      - name: Configure DC01 as Active Directory Domain Controller
+        hosts: domain_controller
+        gather_facts: no
+
+        tasks:
+          - name: Set hostname to DC01
+            ansible.windows.win_hostname:
+              name: DC01
+            register: hostname_change
+
+          - name: Reboot if hostname changed
+            ansible.windows.win_reboot:
+            when: hostname_change.reboot_required
+
+          - name: Install AD DS feature
+            ansible.windows.win_feature:
+              name: AD-Domain-Services
+              include_management_tools: yes
+            register: adds_install
+
+          - name: Reboot after AD DS installation
+            ansible.windows.win_reboot:
+            when: adds_install.reboot_required
+
+          - name: Promote to Domain Controller
+            ansible.windows.win_domain:
+              dns_domain_name: "{{ domain_name }}"
+              safe_mode_password: "{{ safe_mode_password }}"
+              domain_netbios_name: "{{ domain_netbios_name }}"
+            register: dc_promotion
+
+          - name: Reboot after DC promotion
+            ansible.windows.win_reboot:
+              msg: "Rebooting after Domain Controller promotion"
+              post_reboot_delay: 60
+            when: dc_promotion.reboot_required
+
+          - name: Wait for Active Directory Web Services
+            ansible.windows.win_service:
+              name: ADWS
+              state: started
+            retries: 10
+            delay: 30
+            register: adws_service
+            until: adws_service is succeeded
+
+          - name: Create SQL service accounts
+            ansible.windows.win_domain_user:
+              name: "{{ item.name }}"
+              password: "{{ item.password }}"
+              state: present
+              path: "CN=Users,DC=sqllab,DC=local"
+              groups:
+                - Domain Users
+            loop:
+              - { name: "sqlservice", password: "SQLService123!" }
+              - { name: "sqlagent", password: "SQLAgent123!" }
+              - { name: "sqlansible", password: "SQLAnsible123!" }
+
+  - path: /home/ansible/deploy-lab.sh
+    owner: ansible:ansible
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Master deployment script for SQL Server Lab
+      # This script orchestrates the complete lab setup
+
+      set -e
+
+      echo "=========================================="
+      echo "SQL Server Lab Deployment"
+      echo "=========================================="
+      echo ""
+
+      # Check if inventory password has been updated
+      if grep -q "CHANGEME" ~/lab-inventory.yml; then
+          echo "ERROR: Please update the Windows Administrator password in ~/lab-inventory.yml"
+          echo "Run: vim ~/lab-inventory.yml"
+          echo "Change 'ansible_password: CHANGEME' to your actual password"
+          exit 1
+      fi
+
+      echo "Step 1: Testing connectivity to Windows VMs..."
+      echo "----------------------------------------------"
+      if ! ansible windows -m win_ping; then
+          echo ""
+          echo "ERROR: Cannot connect to Windows VMs"
+          echo "Please ensure:"
+          echo "  1. All Windows VMs are running"
+          echo "  2. WinRM is configured on all VMs"
+          echo "  3. Static IPs are configured"
+          echo "  4. Password in lab-inventory.yml is correct"
+          exit 1
+      fi
+
+      echo ""
+      echo "✓ All Windows VMs are reachable"
+      echo ""
+
+      echo "Step 2: Setting up Domain Controller (DC01)..."
+      echo "----------------------------------------------"
+      ansible-playbook ~/playbooks/01-setup-dc.yml
+
+      echo ""
+      echo "✓ Domain Controller setup complete"
+      echo ""
+
+      echo "=========================================="
+      echo "Deployment Complete!"
+      echo "=========================================="
+      echo ""
+      echo "Your lab is now configured with:"
+      echo "  ✓ DC01: Active Directory Domain Controller (sqllab.local)"
+      echo "  - SQL01, SQL02, SQL03: Ready for domain join"
+      echo ""
+      echo "Next steps:"
+      echo "  1. Join SQL nodes to domain: ansible-playbook ~/playbooks/02-join-domain.yml"
+      echo "  2. Create failover cluster: ansible-playbook ~/playbooks/03-configure-cluster.yml"
+      echo "  3. Install SQL Server: ansible-playbook ~/playbooks/04-install-sqlserver.yml"
+      echo ""
+      echo "Or run all at once:"
+      echo "  ansible-playbook ~/playbooks/full-deployment.yml"
+      echo ""
+
   - path: /home/ansible/README.md
     owner: ansible:ansible
     permissions: '0644'
     content: |
-      # Ansible Control Node
-
-      This VM is configured as an Ansible control node for managing the Windows SQL cluster lab.
+      # Ansible Control Node - SQL Server Lab
 
       ## Quick Start
 
-      1. Login: ssh ansible@192.168.122.5
-      2. Test connectivity: ansible windows -m win_ping
-      3. Run playbooks: cd ~/playbooks && ansible-playbook <playbook.yml>
+      ### First Time Setup:
+      1. Update Windows password: `vim ~/lab-inventory.yml`
+      2. Deploy lab: `./deploy-lab.sh`
 
-      ## Authentication
+      ### Manual Deployment:
+      1. Test connectivity: `ansible windows -m win_ping`
+      2. Setup DC: `ansible-playbook ~/playbooks/01-setup-dc.yml`
 
-      - Username: ansible
-      - Authentication: SSH key only (password login disabled)
-      - Sudo: No password required
+      ## Pre-configured Files
 
-      ## Installed Software
+      - `~/lab-inventory.yml` - Ansible inventory
+      - `~/group_vars/all.yml` - Lab variables
+      - `~/playbooks/01-setup-dc.yml` - Domain Controller setup
+      - `~/deploy-lab.sh` - Master deployment script
 
-      - Ansible (latest from Ubuntu repos)
-      - Python3 with pywinrm
-      - Git, Vim, common utilities
+      ## Credentials
 
-      ## Network Configuration
-
-      - IP: 192.168.122.5/24
-      - Gateway: 192.168.122.1
-      - DNS: 192.168.122.1, 8.8.8.8
-
-      ## Inventory
-
-      Pre-configured inventory at: ~/lab-inventory.yml
-
-      Update the ansible_password in the inventory file with your Windows admin password.
+      - Ansible Control: ansible@192.168.122.5 (SSH key auth)
+      - Domain: sqllab.local
+      - Domain Admin: Administrator (your Windows password)
+      - SQL Service Accounts: sqlservice, sqlagent (created by playbook)
 
 # Run commands after first boot
 runcmd:
